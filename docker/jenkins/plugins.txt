@@ -1,0 +1,5 @@
+hashicorp-vault-plugin:379.v080d932e61e4
+workflow-aggregator:latest
+credentials:latest
+configuration-as-code:latest
+job-dsl:latest
