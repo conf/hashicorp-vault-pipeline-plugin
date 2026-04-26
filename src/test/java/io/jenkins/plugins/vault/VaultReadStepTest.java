@@ -56,6 +56,8 @@ class VaultReadStepTest {
         SystemCredentialsProvider.getInstance().getCredentials().add(credential);
     }
 
+    // ---------- tests ----------
+
     @Test
     void descriptorFunctionNameIsVault() {
         assertEquals("vault", new VaultReadStep.DescriptorImpl().getFunctionName());
@@ -71,69 +73,44 @@ class VaultReadStepTest {
 
     @Test
     void readsSecretFromVaultKV1() throws Exception {
-        vault.stubFor(get(urlEqualTo("/v1/secret/myapp"))
-                .willReturn(okJson("{\"request_id\":\"test\",\"data\":{\"password\":\"s3cr3t\"}}")));
+        stubKv1("secret/myapp", "password", "s3cr3t");
 
-        WorkflowJob job = jenkins.createProject(WorkflowJob.class, "test-kv1");
-        job.setDefinition(new CpsFlowDefinition(String.format(
-                "def val = vault(path: 'secret/myapp', key: 'password',"
-                + " vaultUrl: 'http://localhost:%d', credentialsId: '%s', engineVersion: '1')\n"
-                + "echo \"RESULT:${val}\"",
-                vault.getPort(), CREDENTIALS_ID), true));
+        WorkflowRun run = runPipeline("test-kv1",
+                assignToDescription(vaultStep("secret/myapp", "password", "1")));
 
-        WorkflowRun run = jenkins.buildAndAssertSuccess(job);
-        jenkins.assertLogContains("RESULT:s3cr3t", run);
+        assertEquals("s3cr3t", run.getDescription());
     }
 
     @Test
     void readsSecretFromVaultKV2() throws Exception {
-        vault.stubFor(get(urlEqualTo("/v1/secret/data/myapp"))
-                .willReturn(okJson("{\"request_id\":\"test\","
-                        + "\"data\":{\"data\":{\"password\":\"s3cr3t\"},\"metadata\":{}}}")));
+        stubKv2("secret/myapp", "password", "s3cr3t");
 
-        WorkflowJob job = jenkins.createProject(WorkflowJob.class, "test-kv2");
-        job.setDefinition(new CpsFlowDefinition(String.format(
-                "def val = vault(path: 'secret/myapp', key: 'password',"
-                + " vaultUrl: 'http://localhost:%d', credentialsId: '%s', engineVersion: '2')\n"
-                + "echo \"RESULT:${val}\"",
-                vault.getPort(), CREDENTIALS_ID), true));
+        WorkflowRun run = runPipeline("test-kv2",
+                assignToDescription(vaultStep("secret/myapp", "password", "2")));
 
-        WorkflowRun run = jenkins.buildAndAssertSuccess(job);
-        jenkins.assertLogContains("RESULT:s3cr3t", run);
+        assertEquals("s3cr3t", run.getDescription());
     }
 
     @Test
     void usesGlobalVaultUrlWhenStepUrlOmitted() throws Exception {
-        vault.stubFor(get(urlEqualTo("/v1/secret/global"))
-                .willReturn(okJson("{\"request_id\":\"test\",\"data\":{\"token\":\"globalval\"}}")));
+        stubKv1("secret/global", "token", "globalval");
 
-        WorkflowJob job = jenkins.createProject(WorkflowJob.class, "test-global");
-        job.setDefinition(new CpsFlowDefinition(String.format(
-                "def val = vault(path: 'secret/global', key: 'token',"
-                + " credentialsId: '%s', engineVersion: '1')\n"
-                + "echo \"RESULT:${val}\"",
-                CREDENTIALS_ID), true));
+        WorkflowRun run = runPipeline("test-global",
+                assignToDescription(vaultStepNoUrl("secret/global", "token", "1")));
 
-        WorkflowRun run = jenkins.buildAndAssertSuccess(job);
-        jenkins.assertLogContains("RESULT:globalval", run);
+        assertEquals("globalval", run.getDescription());
     }
 
     @Test
     void expandsMacrosInPath() throws Exception {
-        vault.stubFor(get(urlEqualTo("/v1/myapp/config"))
-                .willReturn(okJson("{\"request_id\":\"test\",\"data\":{\"key\":\"macrovalue\"}}")));
+        stubKv1("myapp/config", "key", "macrovalue");
 
-        WorkflowJob job = jenkins.createProject(WorkflowJob.class, "test-macros");
-        job.setDefinition(new CpsFlowDefinition(String.format(
+        WorkflowRun run = runPipeline("test-macros",
                 "withEnv(['APP=myapp']) {\n"
-                + "  def val = vault(path: '${APP}/config', key: 'key',"
-                + "    vaultUrl: 'http://localhost:%d', credentialsId: '%s', engineVersion: '1')\n"
-                + "  echo \"RESULT:${val}\"\n"
-                + "}",
-                vault.getPort(), CREDENTIALS_ID), true));
+                        + "  " + assignToDescription(vaultStep("${APP}/config", "key", "1")) + "\n"
+                        + "}");
 
-        WorkflowRun run = jenkins.buildAndAssertSuccess(job);
-        jenkins.assertLogContains("RESULT:macrovalue", run);
+        assertEquals("macrovalue", run.getDescription());
     }
 
     @Test
@@ -143,12 +120,60 @@ class VaultReadStepTest {
                         .withBody("{\"errors\":[\"permission denied\"]}")));
 
         WorkflowJob job = jenkins.createProject(WorkflowJob.class, "test-403");
-        job.setDefinition(new CpsFlowDefinition(String.format(
-                "vault(path: 'secret/forbidden', key: 'key',"
-                + " vaultUrl: 'http://localhost:%d', credentialsId: '%s', engineVersion: '1')",
-                vault.getPort(), CREDENTIALS_ID), true));
+        job.setDefinition(new CpsFlowDefinition(
+                vaultStep("secret/forbidden", "key", "1"), true));
 
         WorkflowRun run = job.scheduleBuild2(0).get();
         assertEquals(Result.FAILURE, run.getResult());
+    }
+
+    // ---------- helpers ----------
+
+    /** Stub a KV v1 Vault read: {@code GET /v1/<path>} returning {@code {key: value}}. */
+    private void stubKv1(String path, String key, String value) {
+        vault.stubFor(get(urlEqualTo("/v1/" + path))
+                .willReturn(okJson(String.format(
+                        "{\"request_id\":\"t\",\"data\":{\"%s\":\"%s\"}}",
+                        key, value))));
+    }
+
+    /** Stub a KV v2 Vault read: {@code GET /v1/<mount>/data/<rest>} with nested data wrapper. */
+    private void stubKv2(String path, String key, String value) {
+        int sep = path.indexOf('/');
+        String urlPath = "/v1/" + path.substring(0, sep) + "/data/" + path.substring(sep + 1);
+        vault.stubFor(get(urlEqualTo(urlPath))
+                .willReturn(okJson(String.format(
+                        "{\"request_id\":\"t\",\"data\":{\"data\":{\"%s\":\"%s\"},\"metadata\":{}}}",
+                        key, value))));
+    }
+
+    /** A {@code vault(...)} step call with the test vault URL + credentials. */
+    private String vaultStep(String path, String key, String engineVersion) {
+        return String.format(
+                "vault(path: '%s', key: '%s',"
+                        + " vaultUrl: 'http://localhost:%d',"
+                        + " credentialsId: '%s', engineVersion: '%s')",
+                path, key, vault.getPort(), CREDENTIALS_ID, engineVersion);
+    }
+
+    /** A {@code vault(...)} step call that omits vaultUrl (forces fallback to global config). */
+    private String vaultStepNoUrl(String path, String key, String engineVersion) {
+        return String.format(
+                "vault(path: '%s', key: '%s',"
+                        + " credentialsId: '%s', engineVersion: '%s')",
+                path, key, CREDENTIALS_ID, engineVersion);
+    }
+
+    /** Create a pipeline job with the given script and run it, expecting success. */
+    private WorkflowRun runPipeline(String jobName, String script) throws Exception {
+        WorkflowJob job = jenkins.createProject(WorkflowJob.class, jobName);
+        job.setDefinition(new CpsFlowDefinition(script, true));
+        return jenkins.buildAndAssertSuccess(job);
+    }
+
+    /** Assignments to currentBuild.description bypass the console log filter — useful for
+     *  asserting the exact value returned by vault() without fighting secret masking. */
+    private String assignToDescription(String stepExpression) {
+        return "currentBuild.description = " + stepExpression;
     }
 }
