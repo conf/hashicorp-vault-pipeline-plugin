@@ -1,6 +1,6 @@
 package io.jenkins.plugins.vault;
 
-import com.bettercloud.vault.VaultConfig;
+import io.github.jopenlibs.vault.VaultConfig;
 import com.cloudbees.plugins.credentials.CredentialsProvider;
 import com.datapipe.jenkins.vault.VaultAccessor;
 import com.datapipe.jenkins.vault.configuration.GlobalVaultConfiguration;
@@ -20,7 +20,7 @@ import org.jenkinsci.plugins.workflow.steps.StepExecution;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.DataBoundSetter;
 
-import javax.annotation.Nonnull;
+import edu.umd.cs.findbugs.annotations.NonNull;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -129,7 +129,7 @@ public class VaultReadStep extends Step {
         }
 
         @Override
-        public void stop(@Nonnull Throwable throwable) throws Exception {
+        public void stop(@NonNull Throwable throwable) throws Exception {
         }
     }
 

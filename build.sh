@@ -2,4 +2,4 @@
 
 set -euxo pipefail
 
-docker build --progress=plain -t vault-plugin-tests .
+docker build --progress=plain -t vault-plugin-tests:new-vault .
