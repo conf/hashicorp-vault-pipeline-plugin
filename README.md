@@ -2,6 +2,40 @@
 
 Enables the use of vault from within a pipeline.
 
+### Development
+
+All build and test commands run inside Docker — no local Maven/JDK required.
+
+```bash
+make build    # build the test image (Jenkins 2.555.1 + JDK 21)
+make test     # run the JUnit 5 test suite inside the image
+make plugin   # produce target/hashicorp-vault-pipeline.hpi
+make clean    # remove target/
+```
+
+The image caches Maven dependencies in its layer; the test run mounts
+`~/.m2` so subsequent runs skip downloads. Override the image tag or
+Maven cache location via env:
+
+```bash
+make build IMAGE=my-vault-test:dev
+make test  M2=/tmp/m2
+```
+
+#### Integration smoke test (Jenkins + real Vault)
+
+After `make plugin`, bring up Jenkins + HashiCorp Vault:
+
+```bash
+docker compose up --build
+```
+
+- Vault dev server: http://localhost:8200 (root token: `root`)
+- Jenkins: http://localhost:8080 (`admin` / `admin`)
+- Job `vault-smoke-test` is auto-created; it exercises `vault()` in
+  `environment{}`, inline `script{}`, and `withEnv` macro expansion
+  against a live Vault seeded with KV v1 and KV v2 secrets.
+
 ### Dependencies
 
 - [hashicorp-vault-plugin](https://github.com/jenkinsci/hashicorp-vault-plugin)
