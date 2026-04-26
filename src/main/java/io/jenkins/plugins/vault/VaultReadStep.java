@@ -76,9 +76,9 @@ public class VaultReadStep extends Step {
         }
 
         private EnvVars getEnvironment() throws Exception {
-            Run run = getContext().get(Run.class);
-            TaskListener taskListener = getContext().get(TaskListener.class);
-            return run.getEnvironment(taskListener);
+            // getContext().get(EnvVars.class) includes withEnv additions;
+            // run.getEnvironment() only returns the base build environment.
+            return getContext().get(EnvVars.class);
         }
 
         private VaultAccessor getAccessor(Run<?, ?> run, TaskListener listener) throws Exception {
@@ -118,6 +118,9 @@ public class VaultReadStep extends Step {
                 Integer engineVersion = getEngineVersion(environment);
                 String key = Util.replaceMacro(step.key, environment);
                 String value = getAccessor(getContext().get(Run.class), getContext().get(TaskListener.class)).read(path, engineVersion).getData().get(key);
+                if (value == null) {
+                    throw new VaultPluginException(String.format("Key '%s' not found at Vault path '%s'", key, path));
+                }
                 getContext().onSuccess(value);
             } catch (VaultPluginException e) {
                 getContext().onFailure(e);
